@@ -1,8 +1,7 @@
-
 import streamlit as st
 import pandas as pd
-import tempfile
 import os
+import requests
 
 # Fixed parameters to extract
 target_params = [
@@ -27,36 +26,58 @@ target_params = [
     "Inactive Mud Volume (barrels)"
 ]
 
-st.title("CSV Parameter Extractor (Optimized for Render)")
-st.markdown("Upload a large CSV file. This app extracts predefined drilling parameters and provides a downloadable CSV. Optimized for Render hosting.")
+st.title("CSV Parameter Extractor (Large File Compatible)")
+st.markdown("Upload a CSV file, paste a local file path, or provide a public link to a .csv file. This app extracts predefined drilling parameters and allows CSV download.")
 
-uploaded_file = st.file_uploader("Choose a CSV file", type=["csv"])
+method = st.radio("Choose data source method:", ["Upload File", "Paste Local Path", "Paste Public URL"])
 
-if uploaded_file:
-    with st.spinner("Processing, please wait..."):
+df = None
+
+if method == "Upload File":
+    uploaded_file = st.file_uploader("Choose a CSV file", type=["csv"])
+    if uploaded_file:
         try:
-            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".csv")
-            temp_file.write(uploaded_file.read())
-            temp_file.close()
-
-            df = pd.read_csv(temp_file.name, header=None, usecols=range(26), nrows=150)
-            time_labels = df.iloc[0, 1:]
-            data_df = df.set_index(0).iloc[1:]
-            filtered = data_df.loc[data_df.index.intersection(target_params)]
-            filtered.columns = time_labels
-            transposed = filtered.T
-            transposed.index.name = "Timestamp"
-            final_df = transposed.sort_index()
-
-            csv = final_df.to_csv(index=True).encode('utf-8')
-            st.success("File processed successfully!")
-            st.download_button(
-                label="Download Filtered CSV",
-                data=csv,
-                file_name="Filtered_Parameters.csv",
-                mime="text/csv"
-            )
+            df = pd.read_csv(uploaded_file, header=None, usecols=range(26), nrows=150)
         except Exception as e:
-            st.error(f"An error occurred: {str(e)}")
-        finally:
-            os.remove(temp_file.name)
+            st.error(f"Error reading uploaded file: {str(e)}")
+
+elif method == "Paste Local Path":
+    file_path = st.text_input("Enter full path to the CSV file (e.g. /mnt/data/filename.csv):")
+    if file_path and os.path.exists(file_path):
+        try:
+            df = pd.read_csv(file_path, header=None, usecols=range(26), nrows=150)
+        except Exception as e:
+            st.error(f"Error reading local file: {str(e)}")
+    elif file_path:
+        st.warning("The file path does not exist or is not accessible.")
+
+elif method == "Paste Public URL":
+    url = st.text_input("Enter public URL to the CSV file:")
+    if url:
+        try:
+            r = requests.get(url)
+            r.raise_for_status()
+            df = pd.read_csv(pd.compat.StringIO(r.text), header=None, usecols=range(26), nrows=150)
+        except Exception as e:
+            st.error(f"Error reading file from URL: {str(e)}")
+
+if df is not None:
+    try:
+        time_labels = df.iloc[0, 1:]
+        data_df = df.set_index(0).iloc[1:]
+        filtered = data_df.loc[data_df.index.intersection(target_params)]
+        filtered.columns = time_labels
+        transposed = filtered.T
+        transposed.index.name = "Timestamp"
+        final_df = transposed.sort_index()
+
+        csv = final_df.to_csv(index=True).encode('utf-8')
+        st.success("File processed successfully!")
+        st.download_button(
+            label="Download Filtered CSV",
+            data=csv,
+            file_name="Filtered_Parameters.csv",
+            mime="text/csv"
+        )
+    except Exception as e:
+        st.error(f"Processing error: {str(e)}")
